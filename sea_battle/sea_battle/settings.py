@@ -7,14 +7,23 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 
 DEBUG = True
 
+ALLOWED_HOSTS = [
+    '*'
+]
+
 INSTALLED_APPS = [
     'daphne',
+
+    'sea_battle_app',
+
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    'rest_framework'
 ]
 
 MIDDLEWARE = [
@@ -46,7 +55,17 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'sea_battle.wsgi.application'
+
 ASGI_APPLICATION = 'sea_battle.asgi.application'
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
 
 DATABASES = {
     'default': {
