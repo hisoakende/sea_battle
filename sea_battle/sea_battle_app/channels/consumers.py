@@ -1,9 +1,9 @@
-from typing import Any
+from typing import Any, Union
 
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import JsonWebsocketConsumer
 
-from sea_battle_app.battle_logic import create_battle, BattleInfo
+from sea_battle_app.battle_logic import create_battle, BattleInfo, validate_ships_coords
 from sea_battle_app.models import Battle, Player
 
 
