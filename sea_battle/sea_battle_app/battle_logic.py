@@ -1,10 +1,11 @@
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import Enum
-from typing import NamedTuple, Union
+from typing import NamedTuple, Union, Optional
 
 ShipCoordinates = list[list[int]]
 
-PlayerInfoAsDict = dict[str, Union[list[list[int]], list[ShipCoordinates]]]
+PlayerInfoAsDict = dict[str, Union[list[list[int]], Optional[list[ShipCoordinates]]]]
 
 
 class BattleLogicException(Exception):
@@ -17,9 +18,10 @@ class CellState(Enum):
     nothing = 3
 
 
-class PlayerInfo(NamedTuple):
+@dataclass
+class PlayerInfo:
     field: list[list[CellState]]
-    ships_coordinates: list[ShipCoordinates]
+    ships_coordinates: Optional[list[ShipCoordinates]]
 
     def field_as_int(self) -> list[list[int]]:
         return [[cell if isinstance(cell, int) else cell.value for cell in cell_row]
@@ -45,8 +47,8 @@ class BattleInfo(NamedTuple):
 
 def create_battle() -> BattleInfo:
     empty_field = [[CellState.nothing for _ in range(10)] for _ in range(10)]
-    first_player = PlayerInfo(empty_field, [])
-    second_player = PlayerInfo(deepcopy(empty_field), [])
+    first_player = PlayerInfo(empty_field, None)
+    second_player = PlayerInfo(deepcopy(empty_field), None)
     return BattleInfo(first_player, second_player)
 
 
@@ -66,6 +68,9 @@ def _validate_ships_coords(ships_coords: list[ShipCoordinates]) -> None:
 
     if len(ships_coords) != 10:
         raise BattleLogicException('incorrect ships count')
+
+    if len(set([tuple(cell_coord) for cell_coord in sum(ships_coords, [])])) != 20:
+        raise BattleLogicException('incorrect ships coordinates')
 
     forbidden_cells, ships_count_by_size = [], [0, 0, 0, 0]
     for ship_coords in ships_coords:

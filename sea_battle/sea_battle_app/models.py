@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Any
 
 from django.contrib.auth.models import User
@@ -39,9 +40,22 @@ class Battle(models.Model):
     address = models.CharField(max_length=127, unique=True)
     first_player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='first')
     second_player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='second')
-    state = models.JSONField(null=True)
+    json_state = models.JSONField(null=True)
     who_win = models.CharField(max_length=15, choices=player_choices, null=True)
     whose_move = models.CharField(max_length=15, choices=player_choices, null=True)
     datetime = models.DateTimeField(auto_now_add=True)
 
     objects = BattleInfoManager()
+
+    class State(Enum):
+        preparation = 1
+        progress = 2
+        is_over = 3
+
+    @property
+    def state(self) -> State:
+        if self.who_win is None and self.whose_move is None:
+            return self.State.preparation
+        if self.who_win is None:
+            return self.State.progress
+        return self.State.is_over

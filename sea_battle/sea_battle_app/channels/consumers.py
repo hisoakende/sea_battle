@@ -22,6 +22,7 @@ class BattleConsumer(JsonWebsocketConsumer):
             self.close()
             return
 
+        self.accept()
         self.set_player()
 
         if self.battle_model.first_player and self.battle_model.second_player:
@@ -30,7 +31,8 @@ class BattleConsumer(JsonWebsocketConsumer):
         else:
             self.battle_fields = create_battle()
 
-        self.accept()
+        self.send_json({'content': {'type': 'state', 'body': f'{self.battle_model.state.name}'}})
+        self.send_message_to_opponent('request_to_send_data_on_connection', {})
 
     def disconnect(self, code: int) -> None:
         if code != 1000:
@@ -39,7 +41,7 @@ class BattleConsumer(JsonWebsocketConsumer):
         self.player.delete()
         self.battle_model.refresh_from_db()
 
-        if not self.battle_model.first_player and not self.battle_model.second_player:
+        if self.battle_model.first_player is None and self.battle_model.second_player is None:
             self.battle_model.delete()
         else:
             self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent disconnected'})
@@ -55,13 +57,27 @@ class BattleConsumer(JsonWebsocketConsumer):
                 self.process_invalid_request(content)
 
     def load_ships_coordinates(self, ships_coordinates: list[list[list[int]]]) -> None:
+        self.battle_model.refresh_from_db()
+        if self.battle_model.state is not Battle.State.preparation:
+            self.send_json({'content': {'type': 'error', 'body': 'request is not possible at this stage'}})
+            return
+
         condition, message = validate_ships_coords(ships_coordinates)
         if condition:
-            self.battle_fields[self.player_number - 1].ships_coordinates.extend(ships_coordinates)
+            self.battle_fields[self.player_number - 1].ships_coordinates = ships_coordinates
             self.give_battle_info()
-            self.send_json({'content': {'type': 'success', 'body': 'ships successfully placed'}})
-        else:
-            self.send_json({'content': {'type': 'error', 'body': message}})
+            if self.battle_fields[self.opponent_number].ships_coordinates is None:
+                self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent is ready'})
+
+        elif self.battle_fields[self.player_number - 1].ships_coordinates:
+            self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent is not ready'})
+            self.battle_fields[self.player_number - 1].ships_coordinates = None
+
+        self.send_json({'content': {'type': ['error', 'success'][condition],
+                                    'body': message or 'ships successfully placed'}})
+
+        if self.battle_fields[0].ships_coordinates and self.battle_fields[1].ships_coordinates:
+            self.start_game()
 
     def process_invalid_request(self, body: Union[list, dict[str, Any]]) -> None:
         match body:
@@ -80,13 +96,17 @@ class BattleConsumer(JsonWebsocketConsumer):
             return self.battle_model.second_player
         return self.battle_model.first_player
 
+    @property
+    def opponent_number(self) -> int:
+        return 2 // self.player_number - 1
+
     def send_message_to_opponent(self, func_name: str, content: dict[str, Any]) -> None:
         """
         The function allows you to send messages both opponents consumer
         and opponents client depending on which 'func_name' is received
         """
 
-        if self.opponent is not None:
+        if self.opponent:
             async_to_sync(self.channel_layer.send)(
                 self.opponent.channel_name, {'type': func_name, 'content': content}
             )
@@ -109,3 +129,24 @@ class BattleConsumer(JsonWebsocketConsumer):
 
     def set_battle_info(self, content: dict[str, Any]) -> None:
         self.battle_fields = BattleInfo.from_dict(content['content']['battle_info'])
+
+    def request_to_send_data_on_connection(self, *args: Any) -> None:
+        """
+        The method that is needed to request data on connection
+
+        Its use is necessary because in the 'connect' method,
+        data from another user came later than the method was completed
+        """
+
+        self.send_message_to_opponent('send_data_on_connection', {})
+
+    def send_data_on_connection(self, *args: Any) -> None:
+        if self.battle_model.state == Battle.State.preparation:
+            if self.battle_fields[self.opponent_number].ships_coordinates:
+                self.send_json({'content': {'type': 'info', 'body': 'opponent is ready'}})
+
+    def start_game(self) -> None:
+        self.send_json({'content': {'type': 'state', 'body': self.battle_model.state.progress.name}})
+        self.send_message_to_opponent('send_json', {'type': 'state', 'body': self.battle_model.state.progress.name})
+        self.battle_model.whose_move = 'first'
+        self.battle_model.save()
