@@ -1,7 +1,7 @@
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import NamedTuple, Union, Optional
+from typing import NamedTuple, Union, Optional, Any, Callable
 
 ShipCoordinates = list[list[int]]
 
@@ -102,7 +102,7 @@ def validate_ship_coords(ship_coords: ShipCoordinates, forbidden_cells: list[lis
         raise BattleLogicException('incorrect ship coordinates')
 
     check_if_ship_in_forbidden_cells(ship_coords, forbidden_cells)
-    add_forbidden_cells(ship_coords, forbidden_cells)
+    process_cells_adjacent_to_ship(ship_coords, add_forbidden_cells, forbidden_cells)
 
 
 def validate_changing_coord(coord: list[int]) -> None:
@@ -120,13 +120,77 @@ def check_if_ship_in_forbidden_cells(ship_coords: ShipCoordinates, forbidden_cel
             raise BattleLogicException('ships cant be nearby')
 
 
-def add_forbidden_cells(ship_coords: ShipCoordinates, forbidden_cells: list[list[int]]) -> None:
-    """The function that adds neighboring cells with ship to forbidden cells"""
-
+def process_cells_adjacent_to_ship(ship_coords: ShipCoordinates, func: Callable, *args: Any) -> None:
     for x, y in ship_coords:
         for i in (-1, 0, 1):
             for j in (-1, 0, 1):
-                new_cell = [x + i, y + j]
-                if new_cell in ship_coords or new_cell in forbidden_cells:
+                new_x, new_y = x + i, y + j
+                if new_x in (-1, 10) or new_y in (-1, 10):
                     continue
-                forbidden_cells.append(new_cell)
+                func(ship_coords, [new_x, new_y], *args)
+
+
+def add_forbidden_cells(ship_coords: ShipCoordinates, new_cell: list[int],
+                        forbidden_cells: list[list[int]]) -> None:
+    """The function that adds neighboring cell with ship to forbidden cells"""
+
+    if new_cell not in ship_coords and new_cell not in forbidden_cells:
+        forbidden_cells.append(new_cell)
+
+
+def shot_is_valid(shot_coordinates: list[int], field: list[list[CellState]]) -> bool:
+    if not isinstance(field, list):
+        return False
+    if len(shot_coordinates) != 2:
+        return False
+    if any([type(coord) != int for coord in shot_coordinates]):
+        return False
+    if any([coord not in range(0, 10) for coord in shot_coordinates]):
+        return False
+    x, y = shot_coordinates
+    if field[x][y] not in (CellState.nothing, 3):
+        return False
+
+    return True
+
+
+def process_shot(shot_coordinates: list[int], player_info: PlayerInfo) -> bool:
+    """The method that processes a valid shot. Returns 'true' if ship was hit and 'false' if not"""
+
+    x, y = shot_coordinates
+    ship_index = get_affected_ship_index(shot_coordinates, player_info)
+
+    if ship_index is not None:
+        player_info.field[x][y] = CellState.hit
+        ship = player_info.ships_coordinates[ship_index]
+
+        if did_ship_destroy(ship, player_info.field):
+            process_cells_adjacent_to_ship(ship, process_ship_destruction, player_info)
+
+        return True
+
+    player_info.field[x][y] = CellState.missed
+    return False
+
+
+def get_affected_ship_index(shot_coordinates: list[int], player_info: PlayerInfo) -> Optional[int]:
+    """The method that processes hitting the ship. Returns the ship index if ship was hit and 'None' if not"""
+
+    for i, ship_coords in enumerate(player_info.ships_coordinates):
+        if shot_coordinates in ship_coords:
+            return i
+    return None
+
+
+def did_ship_destroy(ship_coords: list[list[int]], field: list[list[CellState]]) -> bool:
+    for x, y in ship_coords:
+        if field[x][y] != CellState.hit:
+            return False
+    return True
+
+
+def process_ship_destruction(ship_coords: ShipCoordinates, new_cell: list[int], player_info: PlayerInfo) -> None:
+    """The method that sets neighbours cell with the ship in 'hit'"""
+
+    if new_cell not in ship_coords:
+        player_info.field[new_cell[0]][new_cell[1]] = CellState.missed

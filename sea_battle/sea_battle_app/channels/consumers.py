@@ -3,7 +3,8 @@ from typing import Any, Union, Optional
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import JsonWebsocketConsumer
 
-from sea_battle_app.battle_logic import create_battle, BattleInfo, validate_ships_coords
+from sea_battle_app.battle_logic import create_battle, BattleInfo, validate_ships_coords, \
+    shot_is_valid, process_shot, CellState
 from sea_battle_app.models import Battle, Player
 
 
@@ -53,6 +54,8 @@ class BattleConsumer(JsonWebsocketConsumer):
         match content:
             case {'type': 'load ships coordinates', 'body': body}:
                 self.load_ships_coordinates(body)
+            case {'type': 'take shot', 'body': body}:
+                self.take_shot(body)
             case _:
                 self.process_invalid_request(content)
 
@@ -67,10 +70,10 @@ class BattleConsumer(JsonWebsocketConsumer):
             self.battle_fields[self.player_number - 1].ships_coordinates = ships_coordinates
             self.give_battle_info()
             if self.battle_fields[self.opponent_number].ships_coordinates is None:
-                self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent is ready'})
+                self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'opponent is ready'})
 
         elif self.battle_fields[self.player_number - 1].ships_coordinates:
-            self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent is not ready'})
+            self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'opponent is not ready'})
             self.battle_fields[self.player_number - 1].ships_coordinates = None
 
         self.send_json({'content': {'type': ['error', 'success'][condition],
@@ -78,6 +81,30 @@ class BattleConsumer(JsonWebsocketConsumer):
 
         if self.battle_fields[0].ships_coordinates and self.battle_fields[1].ships_coordinates:
             self.start_game()
+
+    def take_shot(self, shot_coordinates: list[int]) -> None:
+        self.battle_model.refresh_from_db()
+        if self.battle_model.state is not Battle.State.progress:
+            self.send_json({'content': {'type': 'error', 'body': 'request is not possible at this stage'}})
+            return
+
+        if self.battle_model.whose_move != self.player_number:
+            self.send_json({'content': {'type': 'error', 'body': 'not your move'}})
+            return
+
+        if not shot_is_valid(shot_coordinates, self.battle_fields[self.opponent_number].field):
+            self.send_json({'content': {'type': 'error', 'body': 'incorrect shot'}})
+            return
+
+        ship_was_hit = process_shot(shot_coordinates, self.battle_fields[self.opponent_number])
+        self.send_changes_after_shot(self.battle_fields[self.opponent_number].as_dict()['field'])
+
+        if ship_was_hit:
+            self.send_json({'content': {'type': 'battle logic', 'body': 'your move'}})
+        else:
+            self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'your move'})
+            self.battle_model.whose_move = self.opponent_number + 1
+            self.battle_model.save()
 
     def process_invalid_request(self, body: Union[list, dict[str, Any]]) -> None:
         match body:
@@ -98,6 +125,8 @@ class BattleConsumer(JsonWebsocketConsumer):
 
     @property
     def opponent_number(self) -> int:
+        """Returns opponent number (first player - 0, second player - 1)"""
+
         return 2 // self.player_number - 1
 
     def send_message_to_opponent(self, func_name: str, content: dict[str, Any]) -> None:
@@ -143,10 +172,20 @@ class BattleConsumer(JsonWebsocketConsumer):
     def send_data_on_connection(self, *args: Any) -> None:
         if self.battle_model.state == Battle.State.preparation:
             if self.battle_fields[self.opponent_number].ships_coordinates:
-                self.send_json({'content': {'type': 'info', 'body': 'opponent is ready'}})
+                self.send_json({'content': {'type': 'battle logic', 'body': 'opponent is ready'}})
 
     def start_game(self) -> None:
         self.send_json({'content': {'type': 'state', 'body': self.battle_model.state.progress.name}})
         self.send_message_to_opponent('send_json', {'type': 'state', 'body': self.battle_model.state.progress.name})
-        self.battle_model.whose_move = 'first'
+        self.battle_model.refresh_from_db()
+        self.battle_model.whose_move = 1
         self.battle_model.save()
+
+        if self.player_number == 1:
+            self.send_json({'content': {'type': 'battle logic', 'body': 'your move'}})
+        else:
+            self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'your move'})
+
+    def send_changes_after_shot(self, field: list[list[CellState]]) -> None:
+        self.send_json({'content': {'type': 'changed opponent field', 'body': field}})
+        self.send_message_to_opponent('send_json', {'type': 'changed your field', 'body': field})

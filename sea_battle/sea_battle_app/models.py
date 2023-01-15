@@ -35,14 +35,14 @@ class Battle(models.Model):
     3) if who_win is not null and whose_move is null then game is finished
     """
 
-    player_choices = (('first', 'first'), ('second', 'second'))
+    player_choices = ((1, 1), (2, 2))
 
     address = models.CharField(max_length=127, unique=True)
     first_player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='first')
     second_player = models.ForeignKey(Player, on_delete=models.SET_NULL, null=True, related_name='second')
     json_state = models.JSONField(null=True)
-    who_win = models.CharField(max_length=15, choices=player_choices, null=True)
-    whose_move = models.CharField(max_length=15, choices=player_choices, null=True)
+    who_win = models.IntegerField(choices=player_choices, null=True)
+    whose_move = models.IntegerField(choices=player_choices, null=True)
     datetime = models.DateTimeField(auto_now_add=True)
 
     objects = BattleInfoManager()
