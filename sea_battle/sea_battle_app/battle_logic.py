@@ -21,7 +21,7 @@ class CellState(Enum):
 @dataclass
 class PlayerInfo:
     field: list[list[CellState]]
-    ships_coordinates: Optional[list[ShipCoordinates]]
+    ships_coordinates: list[ShipCoordinates]
 
     def field_as_int(self) -> list[list[int]]:
         return [[cell if isinstance(cell, int) else cell.value for cell in cell_row]
@@ -47,8 +47,8 @@ class BattleInfo(NamedTuple):
 
 def create_battle() -> BattleInfo:
     empty_field = [[CellState.nothing for _ in range(10)] for _ in range(10)]
-    first_player = PlayerInfo(empty_field, None)
-    second_player = PlayerInfo(deepcopy(empty_field), None)
+    first_player = PlayerInfo(empty_field, [])
+    second_player = PlayerInfo(deepcopy(empty_field), [])
     return BattleInfo(first_player, second_player)
 
 
@@ -155,7 +155,7 @@ def shot_is_valid(shot_coordinates: list[int], field: list[list[CellState]]) -> 
 
 
 def process_shot(shot_coordinates: list[int], player_info: PlayerInfo) -> bool:
-    """The method that processes a valid shot. Returns 'true' if ship was hit and 'false' if not"""
+    """The function that processes a valid shot. Returns 'true' if ship was hit and 'false' if not"""
 
     x, y = shot_coordinates
     ship_index = get_affected_ship_index(shot_coordinates, player_info)
@@ -166,6 +166,7 @@ def process_shot(shot_coordinates: list[int], player_info: PlayerInfo) -> bool:
 
         if did_ship_destroy(ship, player_info.field):
             process_cells_adjacent_to_ship(ship, process_ship_destruction, player_info)
+            del player_info.ships_coordinates[ship_index]
 
         return True
 
@@ -174,7 +175,7 @@ def process_shot(shot_coordinates: list[int], player_info: PlayerInfo) -> bool:
 
 
 def get_affected_ship_index(shot_coordinates: list[int], player_info: PlayerInfo) -> Optional[int]:
-    """The method that processes hitting the ship. Returns the ship index if ship was hit and 'None' if not"""
+    """The function that processes hitting the ship. Returns the ship index if ship was hit and 'None' if not"""
 
     for i, ship_coords in enumerate(player_info.ships_coordinates):
         if shot_coordinates in ship_coords:
@@ -190,7 +191,16 @@ def did_ship_destroy(ship_coords: list[list[int]], field: list[list[CellState]])
 
 
 def process_ship_destruction(ship_coords: ShipCoordinates, new_cell: list[int], player_info: PlayerInfo) -> None:
-    """The method that sets neighbours cell with the ship in 'hit'"""
+    """The function that sets neighbours cell with the ship in 'hit'"""
 
     if new_cell not in ship_coords:
         player_info.field[new_cell[0]][new_cell[1]] = CellState.missed
+
+
+def get_ships_count(ships_coordinates: list[ShipCoordinates]) -> dict[str, int]:
+    """The function that returns count living ships count"""
+
+    ships_count = {'1': 0, '2': 0, '3': 0, '4': 0}
+    for ship_coords in ships_coordinates:
+        ships_count[str(len(ship_coords))] += 1
+    return ships_count

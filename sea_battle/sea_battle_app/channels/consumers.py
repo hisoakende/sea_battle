@@ -1,10 +1,10 @@
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Literal
 
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import JsonWebsocketConsumer
 
 from sea_battle_app.battle_logic import create_battle, BattleInfo, validate_ships_coords, \
-    shot_is_valid, process_shot, CellState
+    shot_is_valid, process_shot, get_ships_count, PlayerInfo
 from sea_battle_app.models import Battle, Player
 
 
@@ -69,12 +69,12 @@ class BattleConsumer(JsonWebsocketConsumer):
         if condition:
             self.battle_fields[self.player_number - 1].ships_coordinates = ships_coordinates
             self.give_battle_info()
-            if self.battle_fields[self.opponent_number].ships_coordinates is None:
+            if not self.battle_fields[self.opponent_number].ships_coordinates:
                 self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'opponent is ready'})
 
         elif self.battle_fields[self.player_number - 1].ships_coordinates:
             self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'opponent is not ready'})
-            self.battle_fields[self.player_number - 1].ships_coordinates = None
+            self.battle_fields[self.player_number - 1].ships_coordinates = []
 
         self.send_json({'content': {'type': ['error', 'success'][condition],
                                     'body': message or 'ships successfully placed'}})
@@ -92,19 +92,27 @@ class BattleConsumer(JsonWebsocketConsumer):
             self.send_json({'content': {'type': 'error', 'body': 'not your move'}})
             return
 
-        if not shot_is_valid(shot_coordinates, self.battle_fields[self.opponent_number].field):
+        opponent_info = self.battle_fields[self.opponent_number]
+
+        if not shot_is_valid(shot_coordinates, opponent_info.field):
             self.send_json({'content': {'type': 'error', 'body': 'incorrect shot'}})
             return
 
-        ship_was_hit = process_shot(shot_coordinates, self.battle_fields[self.opponent_number])
-        self.send_changes_after_shot(self.battle_fields[self.opponent_number].as_dict()['field'])
+        ship_was_hit = process_shot(shot_coordinates, opponent_info)
+        self.send_changes_after_shot()
 
         if ship_was_hit:
+            if not any(get_ships_count(opponent_info.ships_coordinates).values()):
+                self.end_game()
+                return
+
             self.send_json({'content': {'type': 'battle logic', 'body': 'your move'}})
         else:
             self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'your move'})
             self.battle_model.whose_move = self.opponent_number + 1
             self.battle_model.save()
+
+        self.give_battle_info()
 
     def process_invalid_request(self, body: Union[list, dict[str, Any]]) -> None:
         match body:
@@ -125,7 +133,7 @@ class BattleConsumer(JsonWebsocketConsumer):
 
     @property
     def opponent_number(self) -> int:
-        """Returns opponent number (first player - 0, second player - 1)"""
+        """The method that returns opponent number (first player - 0, second player - 1)"""
 
         return 2 // self.player_number - 1
 
@@ -173,10 +181,18 @@ class BattleConsumer(JsonWebsocketConsumer):
         if self.battle_model.state == Battle.State.preparation:
             if self.battle_fields[self.opponent_number].ships_coordinates:
                 self.send_json({'content': {'type': 'battle logic', 'body': 'opponent is ready'}})
+        elif self.battle_model.state == Battle.State.progress:
+            self.send_fields()
+            if self.battle_model.whose_move == self.player_number:
+                self.send_json({'content': {'type': 'battle logic', 'body': 'your move'}})
 
     def start_game(self) -> None:
         self.send_json({'content': {'type': 'state', 'body': self.battle_model.state.progress.name}})
         self.send_message_to_opponent('send_json', {'type': 'state', 'body': self.battle_model.state.progress.name})
+
+        self.send_fields()
+        self.send_message_to_opponent('send_fields', {})
+
         self.battle_model.refresh_from_db()
         self.battle_model.whose_move = 1
         self.battle_model.save()
@@ -186,6 +202,44 @@ class BattleConsumer(JsonWebsocketConsumer):
         else:
             self.send_message_to_opponent('send_json', {'type': 'battle logic', 'body': 'your move'})
 
-    def send_changes_after_shot(self, field: list[list[CellState]]) -> None:
-        self.send_json({'content': {'type': 'changed opponent field', 'body': field}})
-        self.send_message_to_opponent('send_json', {'type': 'changed your field', 'body': field})
+    def send_changes_after_shot(self) -> None:
+        player_info = self.battle_fields[self.opponent_number]
+        field = player_info.field_as_int()
+        ships_count = get_ships_count(player_info.ships_coordinates)
+        self.send_json({'content': {'type': 'changed opponent field',
+                                    'body': {'field': field, 'ships_count': ships_count}}})
+        self.send_message_to_opponent('send_json', {'type': 'changed your field',
+                                                    'body': {'field': field, 'ships_count': ships_count}})
+
+    def send_fields(self, *args: Any) -> None:
+        self_info = self.battle_fields[self.player_number - 1]
+        opponents_info = self.battle_fields[self.opponent_number]
+        body = self.create_progress_battle_data(self_info, opponents_info)
+        self.send_json({'content': {'type': 'progress battle data', 'body': body}})
+
+    @staticmethod
+    def create_progress_battle_data(self_info: PlayerInfo,
+                                    opponents_info: PlayerInfo) -> dict[str, Union[list, dict]]:
+        return {'fields': {'your': self_info.field_as_int(),
+                           'opponents': opponents_info.field_as_int()},
+                'living ships': self_info.ships_coordinates,
+                'ships count': {'opponents': get_ships_count(opponents_info.ships_coordinates),
+                                'your': get_ships_count(self_info.ships_coordinates)}}
+
+    def end_game(self) -> None:
+        self.send_json({'content': {'type': 'end game', 'body': 'you are winner'}})
+        self.send_message_to_opponent('send_json', {'content': {'type': 'end game', 'body': 'you are loser'}})
+
+        self_info = self.get_all_data_about_player(self.player_number)
+        opponent_info = self.get_all_data_about_player(self.opponent_number + 1)
+
+        self.send_json({'content': {'type': 'info after end',
+                                    'body': {'your info': self_info}, 'opponents info': opponent_info}})
+        self.send_message_to_opponent('send_json', {'type': 'info after end',
+                                                    'body': {'your info': opponent_info}, 'opponents info': self_info})
+
+    def get_all_data_about_player(self, player_number: int) -> dict[str, Union[list, dict]]:
+        player_info = self.battle_fields[player_number - 1]
+        return {'field': player_info.field_as_int(),
+                'living ships': player_info.ships_coordinates,
+                'ships count': get_ships_count(player_info.ships_coordinates)}
