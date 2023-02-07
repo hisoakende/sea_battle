@@ -1,0 +1,411 @@
+asyncapi: 2.5.0
+
+info:
+  title: Sea Battle WebSockets API
+  version: '1.0.0'
+  description: Api fully processes of the sea battle logic
+
+servers:
+  development:
+    url: '127.0.0.1:8000'
+    protocol: ws
+
+channels:
+  ws/battle/{battleAddress}:
+    publish:
+      message:
+        oneOf:
+          - $ref: '#/components/messages/loadShipsCoordinates'
+          - $ref: '#/components/messages/takeShot'
+    subscribe:
+      message:
+        oneOf:
+          - $ref: '#/components/messages/yourMove'
+          - $ref: '#/components/messages/incorrectRequest'
+          - $ref: '#/components/messages/opponentsReadiness'
+          - $ref: '#/components/messages/battleState'
+          - $ref: '#/components/messages/progressBattleData'
+          - $ref: '#/components/messages/changedYourField'
+          - $ref: '#/components/messages/youAreLoser'
+          - $ref: '#/components/messages/infoAfterEnd'
+
+components:
+  messages:
+    loadShipsCoordinates:
+      title: Load ship coordinates at the beginning of the battle
+      description: Available at the stage 'preparation'
+      payload:
+        $ref: '#/components/schemas/loadShipsCoordinatesPayload'
+      x-response:
+        oneOf:
+          - $ref: '#/components/messages/impossibleAtThisStageRequest'
+          - $ref: '#/components/messages/incorrectLoadingCoordinatesRequest'
+          - $ref: '#/components/messages/correctPlacementOfShips'
+
+    takeShot:
+      title: Take a shot at the opponent's ships
+      description: Available at the stage 'progress'. If request is incorrect then response will be sent. If any ship was hit then the first response is with changed opponent's field and the second is with body 'your move' will be sent. If any ship was not hit then nothing will be sent
+      payload:
+        $ref: '#/components/schemas/takeShotPayload'
+      x-response:
+        oneOf:
+          - $ref: '#/components/messages/impossibleAtThisStageRequest'
+          - $ref: '#/components/messages/opponentsTurn'
+          - $ref: '#/components/messages/incorrectShot'
+          - $ref: '#/components/messages/yourMove'
+          - $ref: '#/components/messages/changedOpponentField'
+          - $ref: '#/components/messages/youAreWinner'
+
+    impossibleAtThisStageRequest:
+      title: The message will be sent if a client request is sent at the wrong stage (preparation or progress)
+      payload:
+        $ref: '#/components/schemas/impossibleRequestPayload'
+
+    incorrectLoadingCoordinatesRequest:
+      title: The message will be sent if loading ships coordinates request is incorrect (incorrect ships coordinates or request format)
+      payload:
+        $ref: '#/components/schemas/incorrectLoadingCoordinatesRequestPayload'
+
+    correctPlacementOfShips:
+      title: The message will be sent if loading ships coordinates request is correct
+      payload:
+        $ref: '#/components/schemas/correctPlacementOfShipsPayload'
+
+    opponentsTurn:
+      title: The message will be sent if it is the opponent's turn now
+      payload:
+        $ref: '#/components/schemas/opponentsTurnPayload'
+
+    incorrectShot:
+      title: The message will be sent if take shot request body is incorrect
+      payload:
+        $ref: '#/components/schemas/incorrectShotPayload'
+
+    yourMove:
+      title: The message will be sent if this player's turn now
+      payload:
+        $ref: '#/components/schemas/yourMovePayload'
+
+    incorrectRequest:
+      title: The message will be sent if the last incomeing request is incorect
+      payload:
+        $ref: '#/components/schemas/incorrectRequestPayload'
+
+    opponentsReadiness:
+      title: The message will be sent if the opponent has set his ships coordinates and he is ready to start battle
+      payload:
+        $ref: '#/components/schemas/opponentsReadinessPayload'
+
+    battleState:
+      title: The message will be sent if the player has connected or the battle state has changed
+      payload:
+        $ref: '#/components/schemas/battleStatePayload'
+
+    progressBattleData:
+      title: The message is sent on connection in 'progress' stage or at the start of the battle
+      payload:
+        $ref: '#/components/schemas/progressBattleDataPayload'
+
+    changedOpponentField:
+      title: The message is sent on a your successful shot
+      payload:
+        $ref: '#/components/schemas/changedOpponentFieldPayload'
+
+    changedYourField:
+      title: The message is sent on a opponent's successful shot
+      payload:
+        $ref: '#/components/schemas/changedYourFieldPayload'
+
+    youAreWinner:
+      title: The message will be sent if the player has destroyed the last opponent's ship
+      payload:
+        $ref: '#/components/schemas/youAreWinnerPayload'
+
+    youAreLoser:
+      title: The message will be sent if the opponent has destroyed the last player's ship
+      payload:
+        $ref: '#/components/schemas/youAreLoserPayload'
+
+    infoAfterEnd:
+      title: The message will be sent if one of players has destroyed the last opponent's ship
+      payload:
+        $ref: '#/components/schemas/infoAfterEndPayload'
+
+  schemas:
+    loadShipsCoordinatesPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: must be 'load ships coordinates'
+        body:
+          type: array
+          description: The first (deepest) array - the coordinates of the one ship cell. The second - the coordinates of all ships cells. And last - the coordinates of all ships. 10 ships are required (length 4 - 1 ship, length 3 - 2 ships, length 2 - 3 ships, length 1 - 4 ships).
+          items:
+            type: array
+            items:
+              type: array
+              items:
+                type: integer
+                description: Two numbers are ship cell coordinates. From 0 to 9 inclusive
+      additionalProperties: false
+
+    takeShotPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: must be 'take a shot'
+        body:
+          type: array
+          description: Shot coordinates
+          items:
+            type: integer
+            description: Two numbers are shot coordinates. From 0 to 9 inclusive
+      additionalProperties: false
+
+    impossibleRequestPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'error'
+        body:
+          type: string
+          description: The field value is 'request is not possible at this stage'
+
+    incorrectLoadingCoordinatesRequestPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'error'
+        body:
+          type: string
+          description: The field value is error message
+
+    correctPlacementOfShipsPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'success'
+        body:
+          type: string
+          description: The field value is 'ships successfully placed'
+
+    opponentsTurnPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'error'
+        body:
+          type: string
+          description: The field value is 'not your move'
+
+    incorrectShotPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'error'
+        body:
+          type: string
+          description: The field value is 'incorrect shot'
+
+    yourMovePayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'battle logic'
+        body:
+          type: string
+          description: The field value is 'your move'
+      additionalProperties: false
+
+    incorrectRequestPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'error'
+        body:
+          type: string
+          description: The field value is in [unknown request type, request must have 'type' field, request must have 'body' field, request must have 'type' and 'body' fields]
+      additionalProperties: false
+
+    opponentsReadinessPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'battle logic'
+        body:
+          type: string
+          description: The field value is 'opponent is ready'
+      additionalProperties: false
+
+    battleStatePayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'state'
+        body:
+          type: string
+          description: The field value is 'preparation' or 'progress'
+      additionalProperties: false
+
+    progressBattleDataPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'progress battle data'
+        body:
+          type: object
+          properties:
+            your info:
+              type: object
+              properties:
+                field:
+                  $ref: '#/components/schemas/fieldSchema'
+                living ships:
+                  $ref: '#/components/schemas/livingShipsSchema'
+                ships count:
+                  $ref: '#/components/schemas/shipsCountSchema'
+              additionalProperties: false
+            opponents info:
+              type: object
+              properties:
+                field:
+                  $ref: '#/components/schemas/fieldSchema'
+                ships count:
+                  $ref: '#/components/schemas/shipsCountSchema'
+              additionalProperties: false
+          additionalProperties: false
+      additionalProperties: false
+
+    changedOpponentFieldPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'changed opponent's field'
+        body:
+          type: object
+          properties:
+            field:
+              $ref: '#/components/schemas/fieldSchema'
+            ships count:
+              $ref: '#/components/schemas/shipsCountSchema'
+          additionalProperties: false
+      additionalProperties: false
+
+    changedYourFieldPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'changed your field'
+        body:
+          type: object
+          properties:
+            field:
+              $ref: '#/components/schemas/fieldSchema'
+            ships count:
+              $ref: '#/components/schemas/shipsCountSchema'
+          additionalProperties: false
+      additionalProperties: false
+
+    youAreWinnerPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'end game'
+        body:
+          type: string
+          description: The field value is 'you are winner'
+      additionalProperties: false
+
+    youAreLoserPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'end game'
+        body:
+          type: string
+          description: The field value is 'you are loser'
+      additionalProperties: false
+
+    infoAfterEndPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: The field value is 'info after end'
+        body:
+          type: object
+          properties:
+            your info:
+              type: object
+              properties:
+                field:
+                  $ref: '#/components/schemas/fieldSchema'
+                living ships:
+                  $ref: '#/components/schemas/livingShipsSchema'
+                ships count:
+                  $ref: '#/components/schemas/shipsCountSchema'
+              additionalProperties: false
+            opponents info:
+              type: object
+              properties:
+                field:
+                  $ref: '#/components/schemas/fieldSchema'
+                living ships:
+                  $ref: '#/components/schemas/livingShipsSchema'
+                ships count:
+                  $ref: '#/components/schemas/shipsCountSchema'
+              additionalProperties: false
+          additionalProperties: false
+      additionalProperties: false
+
+    livingShipsSchema:
+      type: array
+      items:
+        type: array
+        items:
+          type: array
+          items:
+            type: integer
+            description: Two numbers are ship cell coordinates. From 0 to 9 inclusive
+      description: The player's living ships coordinates
+
+    shipsCountSchema:
+      type: object
+      properties:
+        '1':
+          type: integer
+          description: The count of 1-length ships
+        '2':
+          type: integer
+          description: The count of 2-length ships
+        '3':
+          type: integer
+          description: The count of 3-length ships
+        '4':
+          type: integer
+          description: The count of 4-length ships
+      additionalProperties: false
+
+    fieldSchema:
+      type: array
+      items:
+        type: array
+        items:
+          type: integer
+          description: The cell state. 1 - hit, 2 - missed, 3 - nothing

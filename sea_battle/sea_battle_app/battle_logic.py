@@ -150,7 +150,6 @@ def shot_is_valid(shot_coordinates: list[int], field: list[list[CellState]]) -> 
     x, y = shot_coordinates
     if field[x][y] not in (CellState.nothing, 3):
         return False
-
     return True
 
 

@@ -54,7 +54,7 @@ class BattleConsumer(JsonWebsocketConsumer):
         match content:
             case {'type': 'load ships coordinates', 'body': body}:
                 self.load_ships_coordinates(body)
-            case {'type': 'take shot', 'body': body}:
+            case {'type': 'take a shot', 'body': body}:
                 self.take_shot(body)
             case _:
                 self.process_invalid_request(content)
@@ -139,7 +139,7 @@ class BattleConsumer(JsonWebsocketConsumer):
 
     def send_message_to_opponent(self, func_name: str, content: dict[str, Any]) -> None:
         """
-        The function allows you to send messages both opponents consumer
+        The function allows you to send messages opponent's consumer
         and opponents client depending on which 'func_name' is received
         """
 
@@ -182,7 +182,7 @@ class BattleConsumer(JsonWebsocketConsumer):
             if self.battle_fields[self.opponent_number].ships_coordinates:
                 self.send_json({'content': {'type': 'battle logic', 'body': 'opponent is ready'}})
         elif self.battle_model.state == Battle.State.progress:
-            self.send_fields()
+            self.send_progress_battle_data()
             if self.battle_model.whose_move == self.player_number:
                 self.send_json({'content': {'type': 'battle logic', 'body': 'your move'}})
 
@@ -190,8 +190,8 @@ class BattleConsumer(JsonWebsocketConsumer):
         self.send_json({'content': {'type': 'state', 'body': self.battle_model.state.progress.name}})
         self.send_message_to_opponent('send_json', {'type': 'state', 'body': self.battle_model.state.progress.name})
 
-        self.send_fields()
-        self.send_message_to_opponent('send_fields', {})
+        self.send_progress_battle_data()
+        self.send_message_to_opponent('send_progress_battle_data', {})
 
         self.battle_model.refresh_from_db()
         self.battle_model.whose_move = 1
@@ -207,36 +207,28 @@ class BattleConsumer(JsonWebsocketConsumer):
         field = player_info.field_as_int()
         ships_count = get_ships_count(player_info.ships_coordinates)
         self.send_json({'content': {'type': 'changed opponent field',
-                                    'body': {'field': field, 'ships_count': ships_count}}})
+                                    'body': {'field': field, 'ships count': ships_count}}})
         self.send_message_to_opponent('send_json', {'type': 'changed your field',
-                                                    'body': {'field': field, 'ships_count': ships_count}})
+                                                    'body': {'field': field, 'ships count': ships_count}})
 
-    def send_fields(self, *args: Any) -> None:
-        self_info = self.battle_fields[self.player_number - 1]
-        opponents_info = self.battle_fields[self.opponent_number]
-        body = self.create_progress_battle_data(self_info, opponents_info)
-        self.send_json({'content': {'type': 'progress battle data', 'body': body}})
-
-    @staticmethod
-    def create_progress_battle_data(self_info: PlayerInfo,
-                                    opponents_info: PlayerInfo) -> dict[str, Union[list, dict]]:
-        return {'fields': {'your': self_info.field_as_int(),
-                           'opponents': opponents_info.field_as_int()},
-                'living ships': self_info.ships_coordinates,
-                'ships count': {'opponents': get_ships_count(opponents_info.ships_coordinates),
-                                'your': get_ships_count(self_info.ships_coordinates)}}
+    def send_progress_battle_data(self, *args: Any) -> None:
+        self_info = self.get_all_data_about_player(self.player_number)
+        opponents_info = self.get_all_data_about_player(self.opponent_number + 1)
+        opponents_info.pop('living ships')
+        self.send_json({'content': {'type': 'progress battle data',
+                                    'body': {'your info': self_info, 'opponents info': opponents_info}}})
 
     def end_game(self) -> None:
         self.send_json({'content': {'type': 'end game', 'body': 'you are winner'}})
         self.send_message_to_opponent('send_json', {'content': {'type': 'end game', 'body': 'you are loser'}})
 
         self_info = self.get_all_data_about_player(self.player_number)
-        opponent_info = self.get_all_data_about_player(self.opponent_number + 1)
+        opponents_info = self.get_all_data_about_player(self.opponent_number + 1)
 
         self.send_json({'content': {'type': 'info after end',
-                                    'body': {'your info': self_info}, 'opponents info': opponent_info}})
+                                    'body': {'your info': self_info, 'opponents info': opponents_info}}})
         self.send_message_to_opponent('send_json', {'type': 'info after end',
-                                                    'body': {'your info': opponent_info}, 'opponents info': self_info})
+                                                    'body': {'your info': opponents_info, 'opponents info': self_info}})
 
     def get_all_data_about_player(self, player_number: int) -> dict[str, Union[list, dict]]:
         player_info = self.battle_fields[player_number - 1]
