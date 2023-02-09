@@ -17,6 +17,7 @@ channels:
         oneOf:
           - $ref: '#/components/messages/loadShipsCoordinates'
           - $ref: '#/components/messages/takeShot'
+          - $ref: '#/components/messages/surrender'
     subscribe:
       message:
         oneOf:
@@ -57,7 +58,7 @@ components:
           - $ref: '#/components/messages/youAreWinner'
 
     impossibleAtThisStageRequest:
-      title: The message will be sent if a client request is sent at the wrong stage (preparation or progress)
+      title: The message will be sent if a client request is sent at the wrong stage (preparation, progress, finished)
       payload:
         $ref: '#/components/schemas/impossibleRequestPayload'
 
@@ -117,12 +118,12 @@ components:
         $ref: '#/components/schemas/changedYourFieldPayload'
 
     youAreWinner:
-      title: The message will be sent if the player has destroyed the last opponent's ship
+      title: The message will be sent if the player has destroyed the last opponent's ship or if the opponent has surrendered
       payload:
         $ref: '#/components/schemas/youAreWinnerPayload'
 
     youAreLoser:
-      title: The message will be sent if the opponent has destroyed the last player's ship
+      title: The message will be sent if the opponent has destroyed the last player's ship or if the player has surrendered
       payload:
         $ref: '#/components/schemas/youAreLoserPayload'
 
@@ -130,6 +131,11 @@ components:
       title: The message will be sent if one of players has destroyed the last opponent's ship
       payload:
         $ref: '#/components/schemas/infoAfterEndPayload'
+
+    surrender:
+      title: This request allows the player to surrender
+      payload:
+        $ref: '#/components/schemas/surrenderPayload'
 
   schemas:
     loadShipsCoordinatesPayload:
@@ -373,6 +379,13 @@ components:
               additionalProperties: false
           additionalProperties: false
       additionalProperties: false
+
+    surrenderPayload:
+      type: object
+      properties:
+        type:
+          type: string
+          description: must be 'surrender'
 
     livingShipsSchema:
       type: array

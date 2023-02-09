@@ -1,10 +1,11 @@
-from typing import Any, Union, Optional, Literal
+from functools import wraps
+from typing import Any, Union, Optional, Callable
 
 from asgiref.sync import async_to_sync
 from channels.generic.websocket import JsonWebsocketConsumer
 
 from sea_battle_app.battle_logic import create_battle, BattleInfo, validate_ships_coords, \
-    shot_is_valid, process_shot, get_ships_count, PlayerInfo
+    shot_is_valid, process_shot, get_ships_count
 from sea_battle_app.models import Battle, Player
 
 
@@ -27,13 +28,13 @@ class BattleConsumer(JsonWebsocketConsumer):
         self.set_player()
 
         if self.battle_model.first_player and self.battle_model.second_player:
-            self.send_message_to_opponent('give_battle_info', {})
+            self.send_message_to_opponent('give_battle_info')
             self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent connected'})
         else:
             self.battle_fields = create_battle()
 
         self.send_json({'content': {'type': 'state', 'body': f'{self.battle_model.state.name}'}})
-        self.send_message_to_opponent('request_to_send_data_on_connection', {})
+        self.send_message_to_opponent('request_to_send_data_on_connection')
 
     def disconnect(self, code: int) -> None:
         if code != 1000:
@@ -56,15 +57,27 @@ class BattleConsumer(JsonWebsocketConsumer):
                 self.load_ships_coordinates(body)
             case {'type': 'take a shot', 'body': body}:
                 self.take_shot(body)
+            case {'type': 'surrender'}:
+                self.surrender()
             case _:
                 self.process_invalid_request(content)
 
-    def load_ships_coordinates(self, ships_coordinates: list[list[list[int]]]) -> None:
-        self.battle_model.refresh_from_db()
-        if self.battle_model.state is not Battle.State.preparation:
-            self.send_json({'content': {'type': 'error', 'body': 'request is not possible at this stage'}})
-            return
+    @staticmethod
+    def available_at_stage(stage: Battle.State) -> Callable:
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(self, *args: Any) -> Any:
+                self.battle_model.refresh_from_db()
+                if self.battle_model.state is stage:
+                    return func(self, *args)
+                self.send_json({'content': {'type': 'error', 'body': 'request is not possible at this stage'}})
 
+            return wrapper
+
+        return decorator
+
+    @available_at_stage(Battle.State.preparation)
+    def load_ships_coordinates(self, ships_coordinates: list[list[list[int]]]) -> None:
         condition, message = validate_ships_coords(ships_coordinates)
         if condition:
             self.battle_fields[self.player_number - 1].ships_coordinates = ships_coordinates
@@ -82,12 +95,8 @@ class BattleConsumer(JsonWebsocketConsumer):
         if self.battle_fields[0].ships_coordinates and self.battle_fields[1].ships_coordinates:
             self.start_game()
 
+    @available_at_stage(Battle.State.progress)
     def take_shot(self, shot_coordinates: list[int]) -> None:
-        self.battle_model.refresh_from_db()
-        if self.battle_model.state is not Battle.State.progress:
-            self.send_json({'content': {'type': 'error', 'body': 'request is not possible at this stage'}})
-            return
-
         if self.battle_model.whose_move != self.player_number:
             self.send_json({'content': {'type': 'error', 'body': 'not your move'}})
             return
@@ -114,6 +123,11 @@ class BattleConsumer(JsonWebsocketConsumer):
 
         self.give_battle_info()
 
+    @available_at_stage(Battle.State.progress)
+    def surrender(self) -> None:
+        self.send_message_to_opponent('send_json', {'type': 'info', 'body': 'opponent surrendered'})
+        self.send_message_to_opponent('end_game')
+
     def process_invalid_request(self, body: Union[list, dict[str, Any]]) -> None:
         match body:
             case {'type': _, 'body': _}:
@@ -137,7 +151,7 @@ class BattleConsumer(JsonWebsocketConsumer):
 
         return 2 // self.player_number - 1
 
-    def send_message_to_opponent(self, func_name: str, content: dict[str, Any]) -> None:
+    def send_message_to_opponent(self, func_name: str, content: Optional[dict[str, Any]] = None) -> None:
         """
         The function allows you to send messages opponent's consumer
         and opponents client depending on which 'func_name' is received
@@ -175,7 +189,7 @@ class BattleConsumer(JsonWebsocketConsumer):
         data from another user came later than the method was completed
         """
 
-        self.send_message_to_opponent('send_data_on_connection', {})
+        self.send_message_to_opponent('send_data_on_connection')
 
     def send_data_on_connection(self, *args: Any) -> None:
         if self.battle_model.state == Battle.State.preparation:
@@ -191,7 +205,7 @@ class BattleConsumer(JsonWebsocketConsumer):
         self.send_message_to_opponent('send_json', {'type': 'state', 'body': self.battle_model.state.progress.name})
 
         self.send_progress_battle_data()
-        self.send_message_to_opponent('send_progress_battle_data', {})
+        self.send_message_to_opponent('send_progress_battle_data')
 
         self.battle_model.refresh_from_db()
         self.battle_model.whose_move = 1
@@ -218,7 +232,17 @@ class BattleConsumer(JsonWebsocketConsumer):
         self.send_json({'content': {'type': 'progress battle data',
                                     'body': {'your info': self_info, 'opponents info': opponents_info}}})
 
-    def end_game(self) -> None:
+    def end_game(self, *args: Any) -> None:
+        """
+        The method that processes end of the battle
+
+        Only winner can call it
+        """
+
+        self.battle_model.whose_move = None
+        self.battle_model.who_win = self.player_number
+        self.battle_model.save()
+
         self.send_json({'content': {'type': 'end game', 'body': 'you are winner'}})
         self.send_message_to_opponent('send_json', {'content': {'type': 'end game', 'body': 'you are loser'}})
 
