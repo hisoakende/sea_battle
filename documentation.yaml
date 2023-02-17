@@ -11,7 +11,7 @@ servers:
     protocol: ws
 
 channels:
-  ws/battle/{battleAddress}:
+  ws/battle/[battleAddress]:
     publish:
       message:
         oneOf:
@@ -29,6 +29,11 @@ channels:
           - $ref: '#/components/messages/changedYourField'
           - $ref: '#/components/messages/youAreLoser'
           - $ref: '#/components/messages/infoAfterEnd'
+
+  ws/search-battle:
+    subscribe:
+      message:
+        $ref: '#/components/messages/battleFound'
 
 components:
   messages:
@@ -136,6 +141,11 @@ components:
       title: This request allows the player to surrender
       payload:
         $ref: '#/components/schemas/surrenderPayload'
+
+    battleFound:
+      title: This message contains battle address for connection
+      payload:
+        $ref: '#/components/schemas/battleFoundPayload'
 
   schemas:
     loadShipsCoordinatesPayload:
@@ -386,6 +396,15 @@ components:
         type:
           type: string
           description: must be 'surrender'
+      additionalProperties: false
+
+    battleFoundPayload:
+      type: object
+      properties:
+        ws_address:
+          type: string
+          description: the address for connection
+      additionalProperties: false
 
     livingShipsSchema:
       type: array

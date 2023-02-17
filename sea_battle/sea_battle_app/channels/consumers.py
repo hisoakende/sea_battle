@@ -259,3 +259,25 @@ class BattleConsumer(JsonWebsocketConsumer):
         return {'field': player_info.field_as_int(),
                 'living ships': player_info.ships_coordinates,
                 'ships count': get_ships_count(player_info.ships_coordinates)}
+
+
+class SearchOpponentConsumer(JsonWebsocketConsumer):
+    """The consumer that processes search the opponent"""
+
+    def connect(self) -> None:
+        self.accept()
+        async_to_sync(self.channel_layer.group_add)('search', self.channel_name)
+        async_to_sync(self.channel_layer.group_send)('search', {'type': 'connect_player', 'name': self.channel_name})
+
+    def connect_player(self, data: dict[str, str]) -> None:
+        if data['name'] == self.channel_name:
+            return
+
+        battle = Battle.objects.create()
+        async_to_sync(self.channel_layer.send)(data['name'], {'type': 'send_json',
+                                                              'content': {'ws_address': battle.address}})
+        self.send_json({'content': {'ws_address': battle.address}})
+
+    def send_json(self, content: dict[str, Any], close: bool = False) -> None:
+        super().send_json(content['content'])
+        self.close()
